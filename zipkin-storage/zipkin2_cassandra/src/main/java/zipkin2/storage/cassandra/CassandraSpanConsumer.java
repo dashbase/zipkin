@@ -240,4 +240,8 @@ final class CassandraSpanConsumer implements SpanConsumer {
     }
     return TimeUnit.MILLISECONDS.toMicros(System.currentTimeMillis());
   }
+
+  void clear() {
+    deduplicatingExecutor.clear();
+  }
 }

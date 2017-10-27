@@ -16,12 +16,9 @@ package zipkin2.storage.cassandra;
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.LocalDate;
 import com.datastax.driver.core.PreparedStatement;
-import com.google.common.base.Function;
-import com.google.common.collect.Sets;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -33,6 +30,7 @@ import java.util.TimeZone;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import zipkin2.Annotation;
+import zipkin2.Call;
 import zipkin2.Span;
 import zipkin2.internal.Nullable;
 import zipkin2.storage.QueryRequest;
@@ -116,30 +114,14 @@ final class CassandraUtil {
     }
   }
 
-  static Function<List<Map<String, Long>>, Collection<String>> intersectKeySets() {
-    return (Function) IntersectKeySets.INSTANCE;
-  }
-
-  static Function<Map<String, Long>, Collection<String>> traceIdsSortedByDescTimestamp() {
+  static Call.Mapper<Map<String, Long>, List<String>> traceIdsSortedByDescTimestamp() {
     return TraceIdsSortedByDescTimestamp.INSTANCE;
   }
 
-  enum IntersectKeySets implements Function<List<Map<Object, ?>>, Collection<Object>> {
+  enum TraceIdsSortedByDescTimestamp implements Call.Mapper<Map<String, Long>, List<String>> {
     INSTANCE;
 
-    @Override public Collection<Object> apply(@Nullable List<Map<Object, ?>> input) {
-      Set<Object> traceIds = Sets.newLinkedHashSet(input.get(0).keySet());
-      for (int i = 1; i < input.size(); i++) {
-        traceIds.retainAll(input.get(i).keySet());
-      }
-      return traceIds;
-    }
-  }
-
-  enum TraceIdsSortedByDescTimestamp implements Function<Map<String, Long>, Collection<String>> {
-    INSTANCE;
-
-    @Override public Collection<String> apply(@Nullable Map<String, Long> map) {
+    @Override public List<String> map(Map<String, Long> map) {
       // timestamps can collide, so we need to add some random digits on end before using them as serviceSpanKeys
       SortedMap<BigInteger, String> sorted = new TreeMap<>(Collections.reverseOrder());
       map.entrySet().forEach(e ->
@@ -147,7 +129,7 @@ final class CassandraUtil {
             BigInteger.valueOf(e.getValue()).multiply(OFFSET).add(BigInteger.valueOf(RAND.nextInt())),
             e.getKey())
       );
-      return sorted.values();
+      return new ArrayList<>(sorted.values());
     }
 
     private static final Random RAND = new Random(System.nanoTime());

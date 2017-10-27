@@ -21,52 +21,33 @@ import zipkin2.Call;
 import zipkin2.Callback;
 import zipkin2.internal.Nullable;
 
-abstract class ListenableFutureCall<V> extends Call<V> {
-  volatile boolean canceled;
-  boolean executed;
+abstract class ListenableFutureCall<V> extends Call.Base<V> {
   volatile ListenableFuture<V> future;
 
-  @Override public final V execute() throws IOException {
-    synchronized (this) {
-      if (executed) throw new IllegalStateException("Already Executed");
-      executed = true;
-    }
-
-    if (isCanceled()) throw new IOException("Canceled");
+  @Override protected final V doExecute() throws IOException {
     return Futures.getUnchecked(future = newFuture());
   }
 
-  @Override public final void enqueue(Callback<V> callback) {
-    synchronized (this) {
-      if (executed) throw new IllegalStateException("Already Executed");
-      executed = true;
-    }
+  @Override protected final void doEnqueue(Callback<V> callback) {
+    Futures.addCallback((future = newFuture()), new FutureCallback<V>() {
+      @Override public void onSuccess(@Nullable V result) {
+        callback.onSuccess(result);
+      }
 
-    if (isCanceled()) {
-      callback.onError(new IOException("Canceled"));
-    } else {
-      Futures.addCallback((future = newFuture()), new FutureCallback<V>() {
-        @Override public void onSuccess(@Nullable V result) {
-          callback.onSuccess(result);
-        }
-
-        @Override public void onFailure(Throwable t) {
-          callback.onError(t);
-        }
-      });
-    }
+      @Override public void onFailure(Throwable t) {
+        callback.onError(t);
+      }
+    });
   }
 
   protected abstract ListenableFuture<V> newFuture();
 
-  @Override public final void cancel() {
-    canceled = true;
+  @Override public final void doCancel() {
     ListenableFuture<V> maybeFuture = future;
     if (maybeFuture != null) maybeFuture.cancel(true);
   }
 
-  @Override public final boolean isCanceled() {
-    if (canceled) return true;
+  @Override public final boolean doIsCanceled() {
     ListenableFuture<V> maybeFuture = future;
     return maybeFuture != null && maybeFuture.isCancelled();
   }

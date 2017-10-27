@@ -23,48 +23,40 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.utils.UUIDs;
-import com.google.common.base.Function;
 import com.google.common.collect.ContiguousSet;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterators;
-import com.google.common.collect.Ordering;
 import com.google.common.collect.Range;
-import com.google.common.util.concurrent.AsyncFunction;
-import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import zipkin2.internal.Nullable;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import zipkin2.Call;
+import zipkin2.Call.FlatMapper;
+import zipkin2.Call.Mapper;
+import zipkin2.Callback;
 import zipkin2.DependencyLink;
 import zipkin2.Span;
 import zipkin2.internal.DependencyLinker;
+import zipkin2.internal.Nullable;
 import zipkin2.storage.QueryRequest;
 import zipkin2.storage.SpanStore;
 import zipkin2.storage.cassandra.Schema.AnnotationUDT;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.DiscreteDomain.integers;
-import static com.google.common.util.concurrent.Futures.allAsList;
-import static com.google.common.util.concurrent.Futures.immediateFailedFuture;
-import static com.google.common.util.concurrent.Futures.immediateFuture;
-import static com.google.common.util.concurrent.Futures.transformAsync;
-import java.util.concurrent.TimeUnit;
+import static zipkin2.storage.cassandra.CassandraUtil.traceIdsSortedByDescTimestamp;
 import static zipkin2.storage.cassandra.Schema.TABLE_DEPENDENCY;
 import static zipkin2.storage.cassandra.Schema.TABLE_SERVICE_SPANS;
 import static zipkin2.storage.cassandra.Schema.TABLE_SPAN;
@@ -86,12 +78,12 @@ final class CassandraSpanStore implements SpanStore {
   private final PreparedStatement selectTraceIdsByServiceSpanName;
   private final PreparedStatement selectTraceIdsByServiceSpanNameAndDuration;
   private final PreparedStatement selectTraceIdsByAnnotation;
-  private final Function<Row, Map.Entry<String, Long>> traceIdToTimestamp;
-  private final Function<Row, Map.Entry<String, Long>> traceIdToLong;
-  private final Function<Row, String> rowToSpanName;
-  private final Function<Row, String> rowToServiceName;
-  private final Function<Row, Span> rowToSpan;
-  private final Function<List<Map<String, Long>>, Map<String, Long>> collapseTraceIdMaps;
+  private final Mapper<Row, Map.Entry<String, Long>> traceIdToTimestamp;
+  private final Mapper<Row, Map.Entry<String, Long>> traceIdToLong;
+  private final Mapper<Row, String> rowToSpanName;
+  private final Mapper<Row, String> rowToServiceName;
+  private final Mapper<Row, Span> rowToSpan;
+  private final Mapper<List<Map.Entry<String, Long>>, Map<String, Long>> collapseToMap;
   private final int indexTtl;
 
   CassandraSpanStore(CassandraStorage storage) {
@@ -207,15 +199,16 @@ final class CassandraSpanStore implements SpanStore {
       for (AnnotationUDT udt : row.getList("annotations", AnnotationUDT.class)) {
         builder = builder.addAnnotation(udt.toAnnotation().timestamp(), udt.toAnnotation().value());
       }
-      for (Map.Entry<String,String> tag : row.getMap("tags", String.class, String.class).entrySet()) {
+      for (Map.Entry<String, String> tag : row.getMap("tags", String.class, String.class)
+        .entrySet()) {
         builder = builder.putTag(tag.getKey(), tag.getValue());
       }
       return builder.build();
     };
 
-    collapseTraceIdMaps = input -> {
+    collapseToMap = input -> {
       Map<String, Long> result = new LinkedHashMap<>();
-      input.forEach(m -> result.putAll(m));
+      input.forEach(m -> result.put(m.getKey(), m.getValue()));
       return result;
     };
 
@@ -240,59 +233,52 @@ final class CassandraSpanStore implements SpanStore {
   public Call<List<List<Span>>> getTraces(final QueryRequest request) {
     // Over fetch on indexes as they don't return distinct (trace id, timestamp) rows.
     final int traceIndexFetchSize = request.limit() * indexFetchMultiplier;
-    ListenableFuture<Map<String, Long>> traceIdToTimestamp = getTraceIdsByServiceNames(request);
+    Call<List<Map.Entry<String, Long>>> traceIdToTimestamp = getTraceIdsByServiceNames(request);
     List<String> annotationKeys = CassandraUtil.annotationKeys(request);
-    ListenableFuture<Collection<String>> traceIds;
+    Call<List<String>> traceIds;
     if (annotationKeys.isEmpty()) {
       // Simplest case is when there is no annotation query. Limit is valid since there's no AND
       // query that could reduce the results returned to less than the limit.
-      traceIds = Futures.transform(traceIdToTimestamp, CassandraUtil.traceIdsSortedByDescTimestamp());
+      traceIds = traceIdToTimestamp.map(collapseToMap).map(traceIdsSortedByDescTimestamp());
     } else {
       // While a valid port of the scala cassandra span store (from zipkin 1.35), there is a fault.
       // each annotation key is an intersection, meaning we likely return < traceIndexFetchSize.
-      List<ListenableFuture<Map<String, Long>>> futureKeySetsToIntersect = new ArrayList<>();
+      List<Call<Map<String, Long>>> futureKeySetsToIntersect = new ArrayList<>();
       if (request.spanName() != null) {
-        futureKeySetsToIntersect.add(traceIdToTimestamp);
+        futureKeySetsToIntersect.add(traceIdToTimestamp.map(collapseToMap));
       }
       for (String annotationKey : annotationKeys) {
         futureKeySetsToIntersect
-            .add(getTraceIdsByAnnotation(request, annotationKey, request.endTs(), traceIndexFetchSize));
+          .add(
+            getTraceIdsByAnnotation(request, annotationKey, request.endTs(), traceIndexFetchSize));
       }
       // We achieve the AND goal, by intersecting each of the key sets.
-      traceIds = Futures.transform(allAsList(futureKeySetsToIntersect), CassandraUtil.intersectKeySets());
+      traceIds = new IntersectKeySets<>(futureKeySetsToIntersect);
       // @xxx the sorting by timestamp desc is broken here^
     }
 
-    return new ListenableFutureCall<List<List<Span>>>() {
-      @Override protected ListenableFuture<List<List<Span>>> newFuture() {
-        return transformAsync(traceIds, new AsyncFunction<Collection<String>, List<List<Span>>>() {
-          @Override
-          public ListenableFuture<List<List<Span>>> apply(Collection<String> traceIds) {
-            ImmutableSet<String> set =
-              ImmutableSet.copyOf(Iterators.limit(traceIds.iterator(), request.limit()));
-
-            return Futures.transform(
-                    getSpansByTraceIds(set, maxTraceCols),
-                    (List<Span> input) -> {
-
-                List<List<Span>> traces = groupByTraceId(input, strictTraceId);
-                // Due to tokenization of the trace ID, our matches are imprecise on Span.traceIdHigh
-                for (Iterator<List<Span>> trace = traces.iterator(); trace.hasNext(); ) {
-                  List<Span> next = trace.next();
-                  if (next.get(0).traceId().length() > 16 && !request.test(next)) {
-                    trace.remove();
-                  }
-                }
-                return traces;
-              });
+    return traceIds.flatMap(new FlatMapper<List<String>, List<List<Span>>>() {
+      @Override public Call<List<List<Span>>> map(List<String> traceIds) {
+        if (traceIds.size() > request.limit()) {
+          traceIds = traceIds.subList(0, request.limit());
+        }
+        return getSpansByTraceIds(traceIds, maxTraceCols).map(input -> {
+          List<List<Span>> traces = groupByTraceId(input, strictTraceId);
+          // Due to tokenization of the trace ID, our matches are imprecise on Span.traceIdHigh
+          for (Iterator<List<Span>> trace = traces.iterator(); trace.hasNext(); ) {
+            List<Span> next = trace.next();
+            if (next.get(0).traceId().length() > 16 && !request.test(next)) {
+              trace.remove();
+            }
           }
-
-          @Override public String toString() {
-            return "getSpansByTraceIds";
-          }
+          return traces;
         });
       }
-    };
+
+      @Override public String toString() {
+        return "getSpansByTraceIds";
+      }
+    });
   }
 
   @Override public Call<List<Span>> getTrace(String traceId) {
@@ -302,74 +288,53 @@ final class CassandraSpanStore implements SpanStore {
     // Unless we are strict, truncate the trace ID to 64bit (encoded as 16 characters)
     if (!strictTraceId && traceId.length() == 32) traceId = traceId.substring(16);
 
-    Set<String> traceIds = Collections.singleton(traceId);
-    return new ListenableFutureCall<List<Span>>() {
-      @Override protected ListenableFuture<List<Span>> newFuture() {
-        return getSpansByTraceIds(traceIds, maxTraceCols);
-      }
-    };
+    List<String> traceIds = Collections.singletonList(traceId);
+    return getSpansByTraceIds(traceIds, maxTraceCols);
   }
 
   @Override public Call<List<String>> getServiceNames() {
-    try {
-      BoundStatement bound = CassandraUtil.bindWithName(selectServiceNames, "select-service-names");
-
-      return new ListenableFutureCall<List<String>>() {
-        @Override protected ListenableFuture<List<String>> newFuture() {
-          return transformAsync(
-                  session.executeAsync(bound),
-                  readResultAsOrderedSet(Collections.emptyList(), rowToServiceName));
-        }
-      };
-    } catch (RuntimeException ex) {
-      return FailedCall.create(ex);
-    }
+    BoundStatement bound = CassandraUtil.bindWithName(selectServiceNames, "select-service-names");
+    return new ListenableFutureCall<ResultSet>() {
+      @Override protected ListenableFuture<ResultSet> newFuture() {
+        return session.executeAsync(bound);
+      }
+    }.flatMap(new AccumulateIntoList<>(rowToServiceName));
   }
 
   @Override public Call<List<String>> getSpanNames(String serviceName) {
     if (serviceName == null || serviceName.isEmpty()) return EMPTY_LIST;
     serviceName = checkNotNull(serviceName, "serviceName").toLowerCase();
-    try {
-      BoundStatement bound = CassandraUtil.bindWithName(selectSpanNames, "select-span-names")
-          .setString("service", serviceName)
-          // no one is ever going to browse so many span names
-          .setInt("limit_", 1000);
 
-      return new ListenableFutureCall<List<String>>() {
-        @Override protected ListenableFuture<List<String>> newFuture() {
-          return transformAsync(
-                  session.executeAsync(bound),
-                  readResultAsOrderedSet(Collections.emptyList(), rowToSpanName));
-        }
-      };
-    } catch (RuntimeException ex) {
-      return FailedCall.create(ex);
-    }
+    BoundStatement bound = CassandraUtil.bindWithName(selectSpanNames, "select-span-names")
+      .setString("service", serviceName)
+      // no one is ever going to browse so many span names
+      .setInt("limit_", 1000);
+
+    return new ListenableFutureCall<ResultSet>() {
+      @Override protected ListenableFuture<ResultSet> newFuture() {
+        return session.executeAsync(bound);
+      }
+    }.flatMap(new AccumulateIntoList<>(rowToSpanName));
   }
 
   @Override public Call<List<DependencyLink>> getDependencies(long endTs, long lookback) {
     List<LocalDate> days = CassandraUtil.getDays(endTs, lookback);
-    try {
-      BoundStatement bound = CassandraUtil
-              .bindWithName(selectDependencies, "select-dependencies")
-              .setList("days", days);
 
-      return new ListenableFutureCall<List<DependencyLink>>() {
-        @Override protected ListenableFuture<List<DependencyLink>> newFuture() {
-          return Futures.transform(
-                  session.executeAsync(bound),
-                  ConvertDependenciesResponse.INSTANCE);
-        }
-      };
-    } catch (RuntimeException ex) {
-      return FailedCall.create(ex);
-    }
+    BoundStatement bound = CassandraUtil
+      .bindWithName(selectDependencies, "select-dependencies")
+      .setList("days", days);
+
+    return new ListenableFutureCall<ResultSet>() {
+      @Override protected ListenableFuture<ResultSet> newFuture() {
+        return session.executeAsync(bound);
+      }
+    }.map(ConvertDependenciesResponse.INSTANCE);
   }
 
-  enum ConvertDependenciesResponse implements Function<ResultSet, List<DependencyLink>> {
+  enum ConvertDependenciesResponse implements Mapper<ResultSet, List<DependencyLink>> {
     INSTANCE;
 
-    @Override public List<DependencyLink> apply(@Nullable ResultSet rs) {
+    @Override public List<DependencyLink> map(@Nullable ResultSet rs) {
       ImmutableList.Builder<DependencyLink> unmerged = ImmutableList.builder();
       for (Row row : rs) {
         unmerged.add(
@@ -390,56 +355,52 @@ final class CassandraSpanStore implements SpanStore {
    * The return list will contain only spans that have been found, thus the return list may not
    * match the provided list of ids.
    */
-  ListenableFuture<List<Span>> getSpansByTraceIds(Set<String> traceIds, int limit) {
+  Call<List<Span>> getSpansByTraceIds(List<String> traceIds, int limit) {
     checkNotNull(traceIds, "traceIds");
-    if (traceIds.isEmpty()) {
-      return immediateFuture(Collections.<Span>emptyList());
-    }
+    if (traceIds.isEmpty()) return Call.emptyList();
 
-    try {
-      Statement bound = CassandraUtil.bindWithName(selectTraces, "select-span")
-          .setSet("trace_id", traceIds)
-          .setInt("limit_", limit);
+    Statement bound = CassandraUtil.bindWithName(selectTraces, "select-span")
+      .setList("trace_id", traceIds)
+      .setInt("limit_", limit);
 
-      return transformAsync(session.executeAsync(bound), readResults(Collections.emptyList(), rowToSpan));
-    } catch (RuntimeException ex) {
-      return immediateFailedFuture(ex);
-    }
+    return new ListenableFutureCall<ResultSet>() {
+      @Override protected ListenableFuture<ResultSet> newFuture() {
+        return session.executeAsync(bound);
+      }
+    }.flatMap(new AccumulateIntoList<>(rowToSpan));
   }
 
-  ListenableFuture<Map<String, Long>> getTraceIdsByServiceNames(QueryRequest request) {
+  Call<List<Map.Entry<String, Long>>> getTraceIdsByServiceNames(QueryRequest request) {
     long oldestData = Math.max(System.currentTimeMillis() - indexTtl * 1000, 0); // >= 1970
     long startTsMillis = Math.max((request.endTs() - request.lookback()), oldestData);
     long endTsMillis = Math.max(request.endTs(), oldestData);
 
-    try {
-      Set<String> serviceNames;
-      if (null != request.serviceName()) {
-        serviceNames = Collections.singleton(request.serviceName());
-      } else {
-        serviceNames = new LinkedHashSet<>(getServiceNames().execute());
-        if (serviceNames.isEmpty()) {
-          return immediateFuture(Collections.<String, Long>emptyMap());
-        }
-      }
+    Call<List<String>> serviceNames;
+    if (null != request.serviceName()) {
+      serviceNames = Call.create(Collections.singletonList(request.serviceName()));
+    } else {
+      serviceNames = getServiceNames();
+    }
 
-      int startBucket = CassandraUtil.durationIndexBucket(startTsMillis * 1000);
-      int endBucket = CassandraUtil.durationIndexBucket(endTsMillis * 1000);
-      if (startBucket > endBucket) {
-        throw new IllegalArgumentException(
-            "Start bucket (" + startBucket + ") > end bucket (" + endBucket + ")");
-      }
-      Set<Integer> buckets = ContiguousSet.create(Range.closed(startBucket, endBucket), integers());
-      boolean withDuration = null != request.minDuration() || null != request.maxDuration();
-      List<ListenableFuture<Map<String, Long>>> futures = new ArrayList<>();
+    int startBucket = CassandraUtil.durationIndexBucket(startTsMillis * 1000);
+    int endBucket = CassandraUtil.durationIndexBucket(endTsMillis * 1000);
+    if (startBucket > endBucket) {
+      throw new IllegalArgumentException(
+        "Start bucket (" + startBucket + ") > end bucket (" + endBucket + ")");
+    }
+    Set<Integer> buckets = ContiguousSet.create(Range.closed(startBucket, endBucket), integers());
+    boolean withDuration = null != request.minDuration() || null != request.maxDuration();
 
-      if (200 < serviceNames.size() * buckets.size()) {
+    return serviceNames.flatMap(serviceNames1 -> {
+      List<Call<List<Map.Entry<String, Long>>>> calls = new ArrayList<>();
+
+      if (200 < serviceNames1.size() * buckets.size()) {
         LOG.warn("read against " + TABLE_TRACE_BY_SERVICE_SPAN
-            + " fanning out to " + serviceNames.size() * buckets.size() + " requests");
+          + " fanning out to " + serviceNames1.size() * buckets.size() + " requests");
         //@xxx the fan-out of requests here can be improved
       }
 
-      for (String serviceName : serviceNames) {
+      for (String serviceName : serviceNames1) {
         for (Integer bucket : buckets) {
           BoundStatement bound = CassandraUtil
               .bindWithName(
@@ -465,103 +426,71 @@ final class CassandraSpanStore implements SpanStore {
           }
           bound.setFetchSize(request.limit());
 
-          futures.add(transformAsync(
-                  session.executeAsync(bound),
-                  readResultsAsMap(Collections.emptyMap(), traceIdToTimestamp)));
+          BoundStatement finalBound = bound;
+          calls.add(new ListenableFutureCall<ResultSet>() {
+            @Override protected ListenableFuture newFuture() {
+              return session.executeAsync(finalBound);
+            }
+          }.flatMap(new AccumulateIntoList(traceIdToTimestamp)));
         }
       }
 
-      return Futures.transform(allAsList(futures), collapseTraceIdMaps);
-    } catch (IOException ex) {
-      return immediateFailedFuture(ex);
-    }
+      return new AggregateIntoList<>(calls);
+    });
   }
 
-  ListenableFuture<Map<String, Long>> getTraceIdsByAnnotation(
-      QueryRequest request,
-      String annotationKey,
-      long endTsMillis,
-      int limit) {
+  Call<Map<String, Long>> getTraceIdsByAnnotation(
+    QueryRequest request,
+    String annotationKey,
+    long endTsMillis,
+    int limit) {
 
     long lookbackMillis = request.lookback();
     long oldestData = Math.max(System.currentTimeMillis() - indexTtl * 1000, 0); // >= 1970
     long startTsMillis = Math.max((endTsMillis - lookbackMillis), oldestData);
     endTsMillis = Math.max(endTsMillis, oldestData);
 
-    try {
-      BoundStatement bound =
-          CassandraUtil.bindWithName(selectTraceIdsByAnnotation, "select-trace-ids-by-annotation")
-              .setString("l_service", request.serviceName())
-              .setString("annotation_query", "%" + annotationKey + "%")
-              .setUUID("start_ts", UUIDs.startOf(startTsMillis))
-              .setUUID("end_ts", UUIDs.endOf(endTsMillis))
-              .setInt("limit_", limit);
+    BoundStatement bound =
+      CassandraUtil.bindWithName(selectTraceIdsByAnnotation, "select-trace-ids-by-annotation")
+          .setString("l_service", request.serviceName())
+          .setString("annotation_query", "%" + annotationKey + "%")
+          .setUUID("start_ts", UUIDs.startOf(startTsMillis))
+          .setUUID("end_ts", UUIDs.endOf(endTsMillis))
+          .setInt("limit_", limit);
 
-      return transformAsync(session.executeAsync(bound), readResultsAsMap(Collections.emptyMap(), traceIdToLong));
-    } catch (RuntimeException ex) {
-      return immediateFailedFuture(ex);
-    }
+    return new ListenableFutureCall<ResultSet>() {
+      @Override protected ListenableFuture<ResultSet> newFuture() {
+        return session.executeAsync(bound);
+      }
+    }.flatMap(new AccumulateIntoList(traceIdToLong)).map(collapseToMap);
   }
 
-  private static <K, T> AsyncFunction<ResultSet, Map<K, T>> readResultsAsMap(
-      Map<K, T> results,
-      Function<Row, Map.Entry<K, T>> rowMapper) {
+  static class AccumulateIntoList<T> implements FlatMapper<ResultSet, List<T>> {
+    final ImmutableSet.Builder<T> builder = ImmutableSet.builder();
+    final Mapper<Row, T> rowMapper;
 
-    return (rs) -> {
-      if (!rs.isFullyFetched()) rs.fetchMoreResults();
-      Map<K, T> newResults = new HashMap<>(results);
+    AccumulateIntoList(Mapper<Row, T> rowMapper) {
+      this.rowMapper = rowMapper;
+    }
+
+    @Override public Call<List<T>> map(ResultSet rs) {
+      if (!rs.isFullyFetched()) rs.fetchMoreResults(); // TODO: dropped future
       for (Row row : rs) {
-        Map.Entry<K, T> entry = rowMapper.apply(row);
-        newResults.put(entry.getKey(), entry.getValue());
-        if (2000 == rs.getAvailableWithoutFetching() && !rs.isFullyFetched()) rs.fetchMoreResults();
+        builder.add(rowMapper.map(row));
+        if (2000 == rs.getAvailableWithoutFetching() && !rs.isFullyFetched()) {
+          rs.fetchMoreResults();
+        }
         if (0 == rs.getAvailableWithoutFetching()) break;
       }
-
-      Map<K, T> finalResults = ImmutableMap.copyOf(newResults);
-      return rs.getExecutionInfo().getPagingState() == null
-            ? immediateFuture(finalResults)
-            : transformAsync(rs.fetchMoreResults(), readResultsAsMap(finalResults, rowMapper));
-    };
-  }
-
-  private static <T extends Comparable> AsyncFunction<ResultSet, List<T>> readResultAsOrderedSet(
-      List<T> results,
-      Function<Row, T> rowMapper) {
-
-    return (rs) -> {
-        if (!rs.isFullyFetched()) rs.fetchMoreResults();
-        ImmutableSet.Builder<T> builder = ImmutableSet.<T>builder().addAll(results);
-        for (Row row : rs) {
-          builder.add(rowMapper.apply(row));
-          if (2000 == rs.getAvailableWithoutFetching() && !rs.isFullyFetched()) rs.fetchMoreResults();
-          if (0 == rs.getAvailableWithoutFetching()) break;
+      if (rs.getExecutionInfo().getPagingState() == null) {
+        return Call.create(ImmutableList.copyOf(builder.build()));
+      }
+      return new ListenableFutureCall<ResultSet>() {
+        @Override protected ListenableFuture<ResultSet> newFuture() {
+          return rs.fetchMoreResults();
         }
-        List<T> finalSet = ImmutableList.copyOf(Ordering.natural().sortedCopy(builder.build()));
-
-        return rs.getExecutionInfo().getPagingState() == null
-              ? immediateFuture(finalSet)
-              : transformAsync(rs.fetchMoreResults(), readResultAsOrderedSet(finalSet, rowMapper));
-    };
-  }
-
-  private static <T> AsyncFunction<ResultSet, List<T>> readResults(
-      Iterable<T> results,
-      Function<Row, T> rowMapper) {
-
-    return (rs) -> {
-        if (!rs.isFullyFetched()) rs.fetchMoreResults();
-        ImmutableList.Builder<T> builder = ImmutableList.<T>builder().addAll(results);
-        for (Row row : rs) {
-          builder.add(rowMapper.apply(row));
-          if (2000 == rs.getAvailableWithoutFetching() && !rs.isFullyFetched()) rs.fetchMoreResults();
-          if (0 == rs.getAvailableWithoutFetching()) break;
-        }
-        List<T> finalResults = builder.build();
-
-        return rs.getExecutionInfo().getPagingState() == null
-              ? immediateFuture(finalResults)
-              : transformAsync(rs.fetchMoreResults(), readResults(finalResults, rowMapper));
-    };
+      }.flatMap(this);
+    }
   }
 
   // TODO(adriancole): at some later point we can refactor this out
@@ -581,20 +510,98 @@ final class CassandraSpanStore implements SpanStore {
     return new ArrayList<>(groupedByTraceId.values());
   }
 
-  private static class FailedCall<V> extends ListenableFutureCall<V> {
+  static final class IntersectKeySets<K> extends AggregateCall<Map<K, Long>, List<K>> {
 
-    private final RuntimeException ex;
-
-    private FailedCall(RuntimeException ex) {
-      this.ex = ex;
+    IntersectKeySets(List<Call<Map<K, Long>>> calls) {
+      super(calls);
     }
 
-    public static FailedCall create(RuntimeException ex) {
-      return new FailedCall(ex);
+    @Override List<K> newOutput() {
+      return new ArrayList<>();
     }
 
-    @Override protected ListenableFuture<V> newFuture() {
-      return immediateFailedFuture(ex);
+    @Override void append(Map<K, Long> input, List<K> output) {
+      if (output.isEmpty()) {
+        output.addAll(input.keySet());
+      } else {
+        output.retainAll(input.keySet());
+      }
+    }
+
+    @Override boolean isEmpty(List<K> output) {
+      return output.isEmpty();
+    }
+
+    @Override public Call<List<K>> clone() {
+      return new IntersectKeySets<>(calls); // TODO: clone calls
+    }
+  }
+
+  static final class AggregateIntoList<T> extends AggregateCall<List<T>, List<T>> {
+    AggregateIntoList(List<Call<List<T>>> calls) {
+      super(calls);
+    }
+
+    @Override List<T> newOutput() {
+      return new ArrayList<>();
+    }
+
+    @Override void append(List<T> input, List<T> output) {
+      output.addAll(input);
+    }
+
+    @Override boolean isEmpty(List<T> output) {
+      return output.isEmpty();
+    }
+
+    @Override public AggregateIntoList<T> clone() {
+      return new AggregateIntoList<>(calls); // TODO: clone the calls
+    }
+  }
+
+  static abstract class AggregateCall<I, O> extends Call.Base<O> {
+    final List<Call<I>> calls;
+
+    AggregateCall(List<Call<I>> calls) {
+      this.calls = calls;
+    }  // TODO: one day we could make this cancelable
+
+    abstract O newOutput();
+
+    abstract void append(I input, O output);
+
+    abstract boolean isEmpty(O output);
+
+    @Override protected O doExecute() throws IOException {
+      O result = newOutput();
+      IOException ioe = null;
+      RuntimeException rte = null;
+      for (Call<I> call : calls) {
+        try {
+          append(call.execute(), result);
+        } catch (IOException e) {
+          ioe = e;
+        } catch (RuntimeException e) {
+          rte = e;
+        }
+      }
+      if (isEmpty(result)) {
+        if (ioe != null) throw ioe;
+        if (rte != null) throw rte;
+        return result;
+      }
+      return result;
+    }
+
+    @Override protected void doEnqueue(Callback<O> callback) {
+      // TODO(adrian): this is terrible for performance, make this submit for each call and gather
+      new Thread(() -> {
+        try {
+          callback.onSuccess(doExecute());
+        } catch (Throwable t) {
+          callback.onError(t);
+        }
+      }).start();
     }
   }
 }

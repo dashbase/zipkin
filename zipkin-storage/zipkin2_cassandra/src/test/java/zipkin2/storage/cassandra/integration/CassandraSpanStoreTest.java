@@ -13,14 +13,12 @@
  */
 package zipkin2.storage.cassandra.integration;
 
-import com.datastax.driver.core.Host;
-import com.datastax.driver.core.Session;
-import com.google.common.util.concurrent.Uninterruptibles;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import org.junit.AssumptionViolatedException;
+import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import zipkin.Annotation;
 import zipkin.BinaryAnnotation;
@@ -41,13 +39,21 @@ import static org.assertj.core.api.Assertions.failBecauseExceptionWasNotThrown;
 
 abstract class CassandraSpanStoreTest extends SpanStoreTest {
 
-  protected abstract CassandraStorage v2Storage();
+  abstract protected String keyspace();
 
-  @Override protected final StorageComponent storage() {
-    return V2StorageComponent.create(v2Storage());
+  private CassandraStorage storage;
+
+  @Before public void connect() {
+    storage = storageBuilder().keyspace(keyspace()).build();
   }
 
-  @Test
+  protected abstract CassandraStorage.Builder storageBuilder();
+
+  @Override protected final StorageComponent storage() {
+    return V2StorageComponent.create(storage);
+  }
+
+  @Test @Ignore
   public void overFetchesToCompensateForDuplicateIndexData() {
     int traceCount = 2000;
 
@@ -70,7 +76,7 @@ abstract class CassandraSpanStoreTest extends SpanStoreTest {
 
     // Index ends up containing more rows than services * trace count, and cannot be de-duped
     // in a server-side query.
-    assertThat(InternalForTests.rowCountForTraceByServiceSpan(v2Storage()))
+    assertThat(InternalForTests.rowCountForTraceByServiceSpan(storage))
         .isGreaterThan(traceCount * store().getServiceNames().size());
 
     // Implementation over-fetches on the index to allow the user to receive unsurprising results.
@@ -87,7 +93,7 @@ abstract class CassandraSpanStoreTest extends SpanStoreTest {
     Endpoint endpoint = TestObjects.LOTS_OF_SPANS[0].annotations.get(0).endpoint;
     BinaryAnnotation ba = BinaryAnnotation.create("host.name", "host1", endpoint);
 
-    int nbTraceFetched = queryLimit * InternalForTests.indexFetchMultiplier(v2Storage());
+    int nbTraceFetched = queryLimit * InternalForTests.indexFetchMultiplier(storage);
     IntStream.range(0, nbTraceFetched).forEach(i ->
             accept(TestObjects.LOTS_OF_SPANS[i++].toBuilder().timestamp(now - (i * 1000)).build())
     );
@@ -128,19 +134,6 @@ abstract class CassandraSpanStoreTest extends SpanStoreTest {
     super.accept(page.toArray(new Span[0]));
 
     // Now, block until writes complete, notably so we can read them.
-    Session.State state = session().getState();
-    refresh:
-    while (true) {
-      for (Host host : state.getConnectedHosts()) {
-        if (state.getInFlightQueries(host) > 0) {
-          Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
-          state = session().getState();
-          continue refresh;
-        }
-      }
-      break;
-    }
+    InternalForTests.blockWhileInFlight(storage);
   }
-
-  abstract Session session();
 }

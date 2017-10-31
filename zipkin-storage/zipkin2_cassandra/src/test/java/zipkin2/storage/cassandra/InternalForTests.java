@@ -14,7 +14,6 @@
 package zipkin2.storage.cassandra;
 
 import com.datastax.driver.core.Host;
-import com.datastax.driver.core.KeyspaceMetadata;
 import com.datastax.driver.core.LocalDate;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.Insert;
@@ -47,19 +46,16 @@ public class InternalForTests {
   }
 
   public static long rowCountForTraceByServiceSpan(CassandraStorage storage) {
-    return rowCount(storage, Schema.TABLE_TRACE_BY_SERVICE_SPAN);
+    return storage.session()
+      .execute("SELECT COUNT(*) from " + Schema.TABLE_TRACE_BY_SERVICE_SPAN).one().getLong(0);
   }
 
   public static SpanConsumer withoutStrictTraceId(CassandraStorage storage) {
     return storage.toBuilder().strictTraceId(false).build().spanConsumer();
   }
 
-  public static KeyspaceMetadata ensureExists(String keyspace, Session session) {
-    return Schema.ensureExists(keyspace, session);
-  }
-
-  private static long rowCount(CassandraStorage storage, String table) {
-    return storage.session().execute("SELECT COUNT(*) from " + table).one().getLong(0);
+  public static void ensureExists(String keyspace, Session session) {
+    Schema.ensureExists(keyspace, session);
   }
 
   public static void blockWhileInFlight(CassandraStorage storage) {

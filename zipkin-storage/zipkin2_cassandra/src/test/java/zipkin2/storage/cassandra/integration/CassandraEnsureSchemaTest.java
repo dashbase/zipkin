@@ -15,9 +15,7 @@ package zipkin2.storage.cassandra.integration;
 
 import com.datastax.driver.core.KeyspaceMetadata;
 import com.datastax.driver.core.Session;
-import org.junit.Before;
 import org.junit.Test;
-import org.junit.rules.TestName;
 import zipkin2.storage.cassandra.InternalForTests;
 
 import static org.assertj.core.api.Assertions.assertThat;

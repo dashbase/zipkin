@@ -61,19 +61,17 @@ abstract class CassandraSpanConsumerTest {
     Span[] trace = new Span[101];
     trace[0] = TestObjects.CLIENT_SPAN.toBuilder().kind(Span.Kind.SERVER).build();
 
-    IntStream.range(0, 100).forEach(i -> {
-      trace[i + 1] = Span.newBuilder()
-        .traceId(trace[0].traceId())
-        .parentId(trace[0].id())
-        .id(Long.toHexString(i))
-        .name("get")
-        .kind(Span.Kind.CLIENT)
-        .localEndpoint(FRONTEND)
-        .timestamp(
-          trace[0].timestamp() + i * 1000) // all peer span timestamps happen a millisecond later
-        .duration(10L)
-        .build();
-    });
+    IntStream.range(0, 100).forEach(i -> trace[i + 1] = Span.newBuilder()
+      .traceId(trace[0].traceId())
+      .parentId(trace[0].id())
+      .id(Long.toHexString(i))
+      .name("get")
+      .kind(Span.Kind.CLIENT)
+      .localEndpoint(FRONTEND)
+      .timestamp(
+        trace[0].timestamp() + i * 1000) // all peer span timestamps happen a millisecond later
+      .duration(10L)
+      .build());
 
     accept(storage.spanConsumer(), trace);
     assertThat(InternalForTests.rowCountForTraceByServiceSpan(storage))

@@ -37,6 +37,7 @@ import zipkin2.storage.SpanConsumer;
 import zipkin2.storage.cassandra.DeduplicatingExecutor.BoundStatementKey;
 import zipkin2.storage.cassandra.Schema.AnnotationUDT;
 import zipkin2.storage.cassandra.Schema.EndpointUDT;
+import zipkin2.storage.cassandra.internal.call.ListenableFutureCall;
 
 import static zipkin2.storage.cassandra.CassandraUtil.durationIndexBucket;
 
@@ -56,6 +57,8 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
   CassandraSpanConsumer(CassandraStorage storage) {
     session = storage.session();
     strictTraceId = storage.strictTraceId();
+
+    // warns when schema problems exist
     Schema.readMetadata(session);
 
     insertSpan = session.prepare(
@@ -151,7 +154,7 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
     boolean traceIdHigh = !strictTraceId && span.traceId().length() == 32;
 
     // start with the partition key
-    BoundStatement bound = bindWithName(insertSpan, "insert-span")
+    BoundStatement bound = bind(insertSpan)
       .setUUID("ts_uuid", ts_uuid)
       .setString("trace_id", traceIdHigh ? span.traceId().substring(16) : span.traceId())
       .setString("id", span.id());
@@ -185,7 +188,7 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
     }
     if (!span.annotations().isEmpty()) {
       List<AnnotationUDT> annotations = span.annotations().stream()
-        .map(a -> new AnnotationUDT(a))
+        .map(AnnotationUDT::new)
         .collect(Collectors.toList());
       bound.setList("annotations", annotations);
     }
@@ -214,13 +217,12 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
       Long duration) {
 
     int bucket = durationIndexBucket(ts_micro);
-    BoundStatement bound =
-        bindWithName(insertTraceServiceSpanName, "insert-trace-service-span-name")
-            .setString("trace_id", traceId)
-            .setString("service", serviceName)
-            .setString("span", spanName)
-            .setInt("bucket", bucket)
-            .setUUID("ts", ts_uuid);
+    BoundStatement bound = bind(insertTraceServiceSpanName)
+      .setString("trace_id", traceId)
+      .setString("service", serviceName)
+      .setString("span", spanName)
+      .setInt("bucket", bucket)
+      .setUUID("ts", ts_uuid);
 
     if (null != duration) {
       // stored as milliseconds, not microseconds
@@ -231,7 +233,7 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
   }
 
   BoundStatementKey storeServiceSpanName(String serviceName, String spanName) {
-    BoundStatement bound = bindWithName(insertServiceSpanName, "insert-service-span-name")
+    BoundStatement bound = bind(insertServiceSpanName)
       .setString("service", serviceName)
       .setString("span", spanName);
 
@@ -246,10 +248,6 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
       }
     }
     return 0L; // return a timestamp that won't match a query
-  }
-
-  void clear() {
-    deduplicatingExecutor.clear();
   }
 
   class StoreSpansCall extends ListenableFutureCall<Void> {
@@ -278,7 +276,7 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
     }
   }
 
-  BoundStatement bindWithName(PreparedStatement prepared, String name) { // overridable for tests
-    return CassandraUtil.bindWithName(prepared, name);
+  BoundStatement bind(PreparedStatement prepared) { // overridable for tests
+    return prepared.bind();
   }
 }

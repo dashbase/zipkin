@@ -116,10 +116,8 @@ public class CassandraSpanConsumerTest {
     return new CassandraSpanConsumer(
       builder.sessionFactory(mock(CassandraStorage.SessionFactory.class, Mockito.RETURNS_MOCKS))
         .build()) {
-      @Override BoundStatement bindWithName(PreparedStatement prepared,
-        String name) { // overridable for tests
+      @Override BoundStatement bind(PreparedStatement prepared) { // overridable for tests
         return mock(BoundStatement.class, withSettings()
-          .name(name)
           .defaultAnswer(InvocationOnMock::getMock)); // for chaining
       }
     };

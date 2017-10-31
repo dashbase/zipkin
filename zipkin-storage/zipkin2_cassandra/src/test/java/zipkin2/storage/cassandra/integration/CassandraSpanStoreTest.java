@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.stream.IntStream;
 import org.junit.AssumptionViolatedException;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import zipkin.Annotation;
 import zipkin.BinaryAnnotation;
@@ -53,7 +52,7 @@ abstract class CassandraSpanStoreTest extends SpanStoreTest {
     return V2StorageComponent.create(storage);
   }
 
-  @Test @Ignore
+  @Test
   public void overFetchesToCompensateForDuplicateIndexData() {
     int traceCount = 2000;
 

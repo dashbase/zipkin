@@ -58,6 +58,11 @@ abstract class SelectTraceIdsFromSpan extends ResultSetFutureCall {
           .allowFiltering());
     }
 
+    // TODO: limit needs to be handled differently. For example we should really make
+    // the query unbounded, yet stop fetching once we get to request.limit distinct trace IDs
+    // right now, the input is based on the fetch multiplier (3), which works when there are
+    // only 3 or less spans per trace. The fetch multiplier is invalid here because it was
+    // written for a table which doesn't vary on span ID.
     Call<Set<Entry<String, Long>>> newCall(TimestampRange timestampRange, int limit) {
       return new AutoValue_SelectTraceIdsFromSpan_All(
         session,

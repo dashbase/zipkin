@@ -17,7 +17,6 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import zipkin2.Call;
 import zipkin2.Callback;
 
@@ -34,33 +33,17 @@ public abstract class ListenableFutureCall<V> extends Call.Base<V> {
     // Similar to Futures.addCallback except doesn't double-wrap
     class CallbackListener implements Runnable {
       @Override public void run() {
-        final V value;
         try {
-          value = getUninterruptibly(future);
+          callback.onSuccess(getUninterruptibly(future));
         } catch (ExecutionException e) {
           callback.onError(e.getCause());
-          return;
         } catch (RuntimeException | Error e) {
+          propagateIfFatal(e);
           callback.onError(e);
-          return;
         }
-        callback.onSuccess(value);
       }
     }
     (future = newFuture()).addListener(new CallbackListener(), DirectExecutor.INSTANCE);
-  }
-
-  /** Same as {@code MoreExecutors.directExecutor()} except without a guava 18 dep */
-  private enum DirectExecutor implements Executor {
-    INSTANCE;
-
-    @Override public void execute(Runnable command) {
-      command.run();
-    }
-
-    @Override public String toString() {
-      return "MoreExecutors.directExecutor()";
-    }
   }
 
   /** Defers I/O until {@link #enqueue(Callback)} or {@link #execute()} are called. */

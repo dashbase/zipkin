@@ -36,6 +36,10 @@ public abstract class AccumulateAllResults<T> implements FlatMapper<ResultSet, T
 
   @AutoValue
   static abstract class FetchMoreResults extends ListenableFutureCall<ResultSet> {
+    static FetchMoreResults create(ResultSet resultSet) {
+      return new AutoValue_AccumulateAllResults_FetchMoreResults(resultSet);
+    }
+
     abstract ResultSet resultSet();
 
     @Override protected ListenableFuture<ResultSet> newFuture() {
@@ -53,18 +57,15 @@ public abstract class AccumulateAllResults<T> implements FlatMapper<ResultSet, T
 
     abstract BiConsumer<Row, T> accumulator();
 
+    /** Iterates through the rows in each page, flatmapping on more results until exhausted */
     @Override public Call<T> map(ResultSet rs) {
-      if (!rs.isFullyFetched()) rs.fetchMoreResults(); // TODO: dropped future
-      for (Row row : rs) {
-        accumulator().accept(row, pendingResults());
-        // TODO magic number
-        if (2000 == rs.getAvailableWithoutFetching() && !rs.isFullyFetched()) {
-          rs.fetchMoreResults(); // TODO: dropped future
-        }
-        if (0 == rs.getAvailableWithoutFetching()) break;
+      while (rs.getAvailableWithoutFetching() > 0) {
+        accumulator().accept(rs.one(), pendingResults());
       }
-      if (rs.getExecutionInfo().getPagingState() == null) return Call.create(pendingResults());
-      return new AutoValue_AccumulateAllResults_FetchMoreResults(rs).flatMap(this);
+      // Return collected results if there are no more pages
+      return rs.getExecutionInfo().getPagingState() == null && rs.isExhausted()
+        ? Call.create(pendingResults())
+        : FetchMoreResults.create(rs).flatMap(this);
     }
   }
 }

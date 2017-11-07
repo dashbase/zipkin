@@ -100,12 +100,8 @@ final class CassandraSpanStore implements SpanStore {
     final int traceIndexFetchSize = request.limit() * indexFetchMultiplier;
 
     // Allows GET /api/v2/traces
-    if (request.serviceName() == null) {
-      if (request.spanName() != null || request.minDuration() != null
-        || !request.annotationQuery().isEmpty()) {
-        throw new UnsupportedOperationException(
-          "serviceName needed for compound request " + request);
-      }
+    if (request.serviceName() == null && request.minDuration() == null
+      && request.spanName() == null && request.annotationQuery().isEmpty()) {
       // NOTE: When we scan the span table, we can't shortcut this and just return spans that match.
       // If we did, we'd only return pieces of the trace as opposed to the entire trace.
       return spanTable.newCall(timestampRange, traceIndexFetchSize)
@@ -128,6 +124,8 @@ final class CassandraSpanStore implements SpanStore {
       ).map(collapseToMap));
     }
 
+    // trace_by_service_span adds special empty-string keys in order to search by all
+    String serviceName = null != request.serviceName() ? request.serviceName() : "";
     String spanName = null != request.spanName() ? request.spanName() : "";
     Long minDuration = request.minDuration(), maxDuration = request.maxDuration();
     int startBucket = CassandraUtil.durationIndexBucket(timestampRange.startMillis * 1000);
@@ -143,7 +141,7 @@ final class CassandraSpanStore implements SpanStore {
     List<Call<Set<Entry<String, Long>>>> bucketedTraceIdCalls = new ArrayList<>();
     for (int bucket = endBucket; bucket >= startBucket; bucket--) {
       bucketedTraceIdCalls.add(traceIdsFromServiceSpan.newCall(
-        request.serviceName(),
+        serviceName,
         spanName,
         bucket,
         minDuration,

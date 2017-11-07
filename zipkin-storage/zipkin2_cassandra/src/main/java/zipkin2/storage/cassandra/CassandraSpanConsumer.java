@@ -123,28 +123,38 @@ class CassandraSpanConsumer implements SpanConsumer { // not final for testing
 
       statements.add(storeSpan(s, ts_uuid));
 
-      // service span index is refreshed regardless of timestamp
+      // Empty values allow for api queries with blank service or span name
+      String service = s.localServiceName() != null ?  s.localServiceName() : "";
       String span = null != s.name() ? s.name() : "";
+
+      // service span index is refreshed regardless of timestamp
       if (null != s.remoteServiceName()) { // allows getServices to return remote service names
         keys.add(storeServiceSpanName(s.remoteServiceName(), span));
       }
 
-      String service = s.localServiceName();
-      if (null == service) continue; // all of the following indexes require a local service name
-
-      keys.add(storeServiceSpanName(service, span));
+      if (!service.equals("")) {
+        keys.add(storeServiceSpanName(service, span));
+      }
 
       if (ts_micro == 0L) continue; // search is only valid with a timestamp, don't index w/o it!
 
-      // Contract for Repository.storeTraceServiceSpanName is to store the span twice, once with
-      // the span name and another with empty string.
       statements.add(
         storeTraceServiceSpanName(s.traceId(), service, span, ts_micro, ts_uuid, s.duration())
       );
+      if (!service.isEmpty()) {
+        statements.add( // Allows lookup without the service name
+          storeTraceServiceSpanName(s.traceId(), "", span, ts_micro, ts_uuid, s.duration())
+        );
+      }
       if (span.isEmpty()) continue;
       statements.add( // Allows lookup without the span name
         storeTraceServiceSpanName(s.traceId(), service, "", ts_micro, ts_uuid, s.duration())
       );
+      if (!service.isEmpty()) {
+        statements.add( // Allows lookup without the service name
+          storeTraceServiceSpanName(s.traceId(), "", "", ts_micro, ts_uuid, s.duration())
+        );
+      }
     }
     return new StoreSpansCall(statements, keys);
   }

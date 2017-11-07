@@ -13,6 +13,7 @@
  */
 package zipkin2.storage.cassandra;
 
+import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
@@ -27,6 +28,7 @@ import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import zipkin2.Call;
+import zipkin2.internal.Nullable;
 import zipkin2.storage.cassandra.CassandraSpanStore.TimestampRange;
 import zipkin2.storage.cassandra.internal.call.AccumulateAllResults;
 import zipkin2.storage.cassandra.internal.call.ResultSetFutureCall;
@@ -38,7 +40,7 @@ import static zipkin2.storage.cassandra.Schema.TABLE_SPAN;
 abstract class SelectTraceIdsFromSpan extends ResultSetFutureCall {
   static class Factory {
     final Session session;
-    final PreparedStatement all, withAnnotationQuery;
+    final PreparedStatement all, withAnnotationQuery, withServiceAndAnnotationQuery;
 
     Factory(Session session) {
       this.session = session;
@@ -49,6 +51,13 @@ abstract class SelectTraceIdsFromSpan extends ResultSetFutureCall {
           .limit(bindMarker("limit_"))
           .allowFiltering());
       this.withAnnotationQuery = session.prepare(
+        QueryBuilder.select("ts", "trace_id").from(TABLE_SPAN)
+          .where(QueryBuilder.like("annotation_query", bindMarker("annotation_query")))
+          .and(QueryBuilder.gte("ts_uuid", bindMarker("start_ts")))
+          .and(QueryBuilder.lte("ts_uuid", bindMarker("end_ts")))
+          .limit(bindMarker("limit_"))
+          .allowFiltering());
+      this.withServiceAndAnnotationQuery = session.prepare(
         QueryBuilder.select("ts", "trace_id").from(TABLE_SPAN)
           .where(QueryBuilder.eq("l_service", bindMarker("l_service")))
           .and(QueryBuilder.like("annotation_query", bindMarker("annotation_query")))
@@ -74,14 +83,14 @@ abstract class SelectTraceIdsFromSpan extends ResultSetFutureCall {
     }
 
     Call<Set<Entry<String, Long>>> newCall(
-      String serviceName,
+      @Nullable String serviceName,
       String annotationKey,
       TimestampRange timestampRange,
       int limit
     ) {
       return new AutoValue_SelectTraceIdsFromSpan_ByAnnotationQuery(
         session,
-        withAnnotationQuery,
+        serviceName != null ? withServiceAndAnnotationQuery : withAnnotationQuery,
         timestampRange.startUUID,
         timestampRange.endUUID,
         limit,
@@ -102,14 +111,14 @@ abstract class SelectTraceIdsFromSpan extends ResultSetFutureCall {
   @AutoValue
   static abstract class ByAnnotationQuery extends SelectTraceIdsFromSpan {
 
-    abstract String l_service();
+    @Nullable abstract String l_service();
 
     abstract String annotation_query();
 
     @Override public Statement newStatement() {
-      return preparedStatement().bind()
-        .setString("l_service", l_service())
-        .setString("annotation_query", annotation_query())
+      BoundStatement result = preparedStatement().bind();
+      if (l_service() != null) result.setString("l_service", l_service());
+      return result.setString("annotation_query", annotation_query())
         .setUUID("start_ts", start_ts())
         .setUUID("end_ts", end_ts())
         .setInt("limit_", limit_())

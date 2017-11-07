@@ -16,7 +16,6 @@ package zipkin2.storage.cassandra.integration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
-import org.junit.AssumptionViolatedException;
 import org.junit.Before;
 import org.junit.Test;
 import zipkin.Annotation;
@@ -34,7 +33,7 @@ import zipkin2.storage.cassandra.InternalForTests;
 
 import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.failBecauseExceptionWasNotThrown;
+import static zipkin2.TestObjects.DAY;
 
 abstract class CassandraSpanStoreTest extends SpanStoreTest {
 
@@ -79,9 +78,9 @@ abstract class CassandraSpanStoreTest extends SpanStoreTest {
         .isGreaterThan(traceCount * store().getServiceNames().size());
 
     // Implementation over-fetches on the index to allow the user to receive unsurprising results.
-
-    // Ensure we use serviceName query so that trace_by_service_span is used
-    QueryRequest request = QueryRequest.builder().serviceName("web").limit(traceCount).build();
+    QueryRequest request = QueryRequest.builder()
+      .serviceName("web") // Ensure we use serviceName query so that trace_by_service_span is used
+      .lookback(DAY).limit(traceCount).build();
     assertThat(store().getTraces(request))
         .hasSize(traceCount);
   }
@@ -110,16 +109,8 @@ abstract class CassandraSpanStoreTest extends SpanStoreTest {
                     .serviceName(endpoint.serviceName)
                     .limit(queryLimit)
                     .build();
+    // TODO: this test is flakey, figure out why
     assertThat(store().getTraces(queryRequest)).hasSize(queryLimit);
-  }
-
-  @Override public void getTraces_duration_allServices() {
-    try {
-      super.getTraces_duration_allServices();
-      failBecauseExceptionWasNotThrown(IllegalArgumentException.class);
-    } catch (IllegalArgumentException e) {
-      throw new AssumptionViolatedException("duration queries across all services is unsupported");
-    }
   }
 
   /** Makes sure the test cluster doesn't fall over on BusyPoolException */

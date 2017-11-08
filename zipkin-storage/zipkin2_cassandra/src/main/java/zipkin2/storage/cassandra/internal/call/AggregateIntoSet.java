@@ -23,15 +23,15 @@ public final class AggregateIntoSet<T> extends AggregateCall<Set<T>, Set<T>> {
     super(calls);
   }
 
-  @Override Set<T> newOutput() {
+  @Override protected Set<T> newOutput() {
     return new LinkedHashSet<>();
   }
 
-  @Override void append(Set<T> input, Set<T> output) {
+  @Override protected void append(Set<T> input, Set<T> output) {
     output.addAll(input);
   }
 
-  @Override boolean isEmpty(Set<T> output) {
+  @Override protected boolean isEmpty(Set<T> output) {
     return output.isEmpty();
   }
 

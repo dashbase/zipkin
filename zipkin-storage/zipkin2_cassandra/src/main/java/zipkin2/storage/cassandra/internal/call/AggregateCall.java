@@ -18,24 +18,24 @@ import java.util.List;
 import zipkin2.Call;
 import zipkin2.Callback;
 
-abstract class AggregateCall<I, O> extends Call.Base<O> {
-  final List<Call<I>> calls;
+public abstract class AggregateCall<I, O> extends Call.Base<O> {
+  public final List<Call<I>> calls;
 
-  AggregateCall(List<Call<I>> calls) {
+  protected AggregateCall(List<Call<I>> calls) {
     this.calls = calls;
   }  // TODO: one day we could make this cancelable
 
-  abstract O newOutput();
+  protected abstract O newOutput();
 
-  abstract void append(I input, O output);
+  protected abstract void append(I input, O output);
 
-  abstract boolean isEmpty(O output);
+  protected abstract boolean isEmpty(O output);
 
   @Override protected O doExecute() throws IOException {
     O result = newOutput();
     IOException ioe = null;
     RuntimeException rte = null;
-    for (Call<I> call : calls) {
+    for (Call<? extends I> call : calls) {
       try {
         append(call.execute(), result);
       } catch (IOException e) {

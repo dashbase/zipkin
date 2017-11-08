@@ -38,11 +38,11 @@ public abstract class ResultSetFutureCall extends Call.Base<ResultSet> {
 
   volatile ResultSetFuture future;
 
-  @Override protected final ResultSet doExecute() throws IOException {
+  @Override protected ResultSet doExecute() throws IOException {
     return (future = newFuture()).getUninterruptibly();
   }
 
-  @Override protected final void doEnqueue(Callback<ResultSet> callback) {
+  @Override protected void doEnqueue(Callback<ResultSet> callback) {
     // Similar to Futures.addCallback except doesn't double-wrap
     class CallbackListener implements Runnable {
       @Override public void run() {
@@ -57,12 +57,12 @@ public abstract class ResultSetFutureCall extends Call.Base<ResultSet> {
     (future = newFuture()).addListener(new CallbackListener(), DirectExecutor.INSTANCE);
   }
 
-  @Override public final void doCancel() {
+  @Override protected void doCancel() {
     ResultSetFuture maybeFuture = future;
     if (maybeFuture != null) maybeFuture.cancel(true);
   }
 
-  @Override public final boolean doIsCanceled() {
+  @Override protected final boolean doIsCanceled() {
     ResultSetFuture maybeFuture = future;
     return maybeFuture != null && maybeFuture.isCancelled();
   }

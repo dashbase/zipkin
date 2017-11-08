@@ -25,13 +25,13 @@ public final class IntersectKeySets extends AggregateCall<Map<String, Long>, Set
     super(calls);
   }
 
-  @Override Set<String> newOutput() {
+  @Override protected Set<String> newOutput() {
     return new LinkedHashSet<>();
   }
 
   boolean firstInput = true;
 
-  @Override void append(Map<String, Long> input, Set<String> output) {
+  @Override protected void append(Map<String, Long> input, Set<String> output) {
     if (firstInput) {
       firstInput = false;
       output.addAll(input.keySet());
@@ -40,7 +40,7 @@ public final class IntersectKeySets extends AggregateCall<Map<String, Long>, Set
     }
   }
 
-  @Override boolean isEmpty(Set<String> output) {
+  @Override protected boolean isEmpty(Set<String> output) {
     return output.isEmpty();
   }
 

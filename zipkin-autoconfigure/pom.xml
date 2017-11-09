@@ -42,6 +42,7 @@
     <module>storage-elasticsearch-http</module>
     <module>storage-elasticsearch-aws</module>
     <module>storage-mysql</module>
+    <module>storage-dashbase</module>
     <module>metrics-prometheus</module>
   </modules>
 

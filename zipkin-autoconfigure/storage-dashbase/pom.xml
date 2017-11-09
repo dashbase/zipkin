@@ -22,17 +22,24 @@
       <groupId>${project.groupId}</groupId>
       <artifactId>zipkin-storage-dashbase</artifactId>
     </dependency>
-
     <dependency>
-      <groupId>io.zipkin.brave</groupId>
-      <artifactId>brave-core</artifactId>
-      <version>${brave.version}</version>
-      <optional>true</optional>
+      <groupId>io.zipkin.java</groupId>
+      <artifactId>zipkin</artifactId>
     </dependency>
   </dependencies>
 
   <build>
     <plugins>
+      <plugin>
+        <groupId>com.mycila</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- TODO: decide how we want to handle this -->
+            <phase>none</phase>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 </project>

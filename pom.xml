@@ -243,6 +243,18 @@
 
       <dependency>
         <groupId>${project.groupId}</groupId>
+        <artifactId>zipkin-storage-dashbase</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>zipkin-autoconfigure-storage-dashbase</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>${project.groupId}</groupId>
         <artifactId>zipkin-autoconfigure-metrics-prometheus</artifactId>
         <version>${project.version}</version>
       </dependency>

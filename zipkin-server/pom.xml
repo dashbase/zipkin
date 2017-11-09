@@ -159,6 +159,13 @@
       <optional>true</optional>
     </dependency>
 
+    <!-- Dashbase backend -->
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>zipkin-autoconfigure-storage-dashbase</artifactId>
+      <optional>true</optional>
+    </dependency>
+
     <!-- Kafka Collector -->
     <dependency>
       <groupId>${project.groupId}</groupId>

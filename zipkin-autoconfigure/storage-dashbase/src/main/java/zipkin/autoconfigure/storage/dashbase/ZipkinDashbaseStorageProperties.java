@@ -1,29 +1,48 @@
 package zipkin.autoconfigure.storage.dashbase;
 
-import java.io.Serializable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import java.io.Serializable;
 
 @ConfigurationProperties("zipkin.storage.dashbase")
 public class ZipkinDashbaseStorageProperties implements Serializable { // for Spark jobs
   private static final long serialVersionUID = 0L;
 
-  private String host = "localhost";
-  private int port = 7888;
+  private String apiUrl;
+  private String kafkaUrl;
+  private String topic;
+  private String tableName;
 
-  public String getHost() {
-    return host;
+  public String getApiUrl() {
+    return apiUrl;
   }
 
-  public void setHost(String host) {
-    this.host = host;
+  public void setApiUrl(String apiUrl) {
+    this.apiUrl = apiUrl;
   }
 
-  public int getPort() {
-    return port;
+  public String getKafkaUrl() {
+    return kafkaUrl;
   }
 
-  public void setPort(int port) {
-    this.port = port;
+  public void setKafkaUrl(String kafkaUrl) {
+    this.kafkaUrl = kafkaUrl;
+  }
+
+  public void setTopic(String topic) {
+    this.topic = topic;
+  }
+
+  public String getTopic() {
+    return topic;
+  }
+
+  public String getTableName() {
+    return tableName;
+  }
+
+  public void setTableName(String tableName) {
+    this.tableName = tableName;
   }
 
 }

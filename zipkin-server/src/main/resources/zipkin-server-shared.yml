@@ -48,7 +48,7 @@ zipkin:
 
   storage:
     strict-trace-id: ${STRICT_TRACE_ID:true}
-    type: ${STORAGE_TYPE:mem}
+    type: ${STORAGE_TYPE:dashbase}
     mem:
       # Maximum number of spans to keep in memory.  When exceeded, oldest traces (and their spans) will be purged.
       # A safe estimate is 1K of memory per span (each span with 2 annotations + 1 binary annotation), plus
@@ -122,8 +122,10 @@ zipkin:
       max-active: ${MYSQL_MAX_CONNECTIONS:10}
       use-ssl: ${MYSQL_USE_SSL:false}
     dashbase:
-      host: ${DASHBASE_HOST:localhost}
-      port: ${DASHBASE_PORT:3306}
+      api-url: ${API_URL:http://localhost:9876}
+      kafka-url: ${KAFKA_URL:localhost:9092}
+      topic: ${KAFKA_TOPIC:nginx_json}
+      table-name: ${TABLE_NAME:nginx_json}
   ui:
     enabled: ${QUERY_ENABLED:true}
     ## Values below here are mapped to ZipkinUiProperties, served as /config.json

@@ -17,7 +17,7 @@ import zipkin2.dashbase.DashbaseStorage;
 @ConditionalOnMissingBean(StorageComponent.class)
 public class ZipkinDashbaseStorageAutoConfiguration {
   @Autowired(required = false)
-  ZipkinDashbaseStorageProperties dashbase;
+  ZipkinDashbaseStorageProperties props;
 
   @Bean
   StorageComponent storage(
@@ -25,6 +25,10 @@ public class ZipkinDashbaseStorageAutoConfiguration {
   ) {
     return V2StorageComponent.create(DashbaseStorage.newBuilder()
       .strictTraceId(strictTraceId)
+      .apiUrl(props.getApiUrl())
+      .kafkaUrl(props.getKafkaUrl())
+      .topic(props.getTopic())
+      .tableName(props.getTableName())
       .build());
   }
 

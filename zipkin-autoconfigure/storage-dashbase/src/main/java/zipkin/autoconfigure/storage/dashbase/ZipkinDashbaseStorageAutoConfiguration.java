@@ -29,6 +29,9 @@ public class ZipkinDashbaseStorageAutoConfiguration {
       .kafkaUrl(props.getKafkaUrl())
       .topic(props.getTopic())
       .tableName(props.getTableName())
+      .ssl(props.isSsl())
+      .keystoreLocation(props.getKeystoreLocation())
+      .keystorePassword(props.getKeystorePassword())
       .build());
   }
 

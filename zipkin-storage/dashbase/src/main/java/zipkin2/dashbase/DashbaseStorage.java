@@ -21,6 +21,9 @@ public class DashbaseStorage extends StorageComponent {
     String kafkaUrl;
     String topic;
     String tableName;
+    boolean ssl;
+    String keystoreLocation;
+    String keystorePassword;
 
     @Override
     public Builder strictTraceId(boolean strictTraceId) {
@@ -48,6 +51,21 @@ public class DashbaseStorage extends StorageComponent {
       return this;
     }
 
+    public Builder ssl(boolean ssl) {
+      this.ssl = ssl;
+      return this;
+    }
+
+    public Builder keystoreLocation(String keystoreLocation) {
+      this.keystoreLocation = keystoreLocation;
+      return this;
+    }
+
+    public Builder keystorePassword(String keystorePassword) {
+      this.keystorePassword = keystorePassword;
+      return this;
+    }
+
     @Override
     public DashbaseStorage build() {
       return new DashbaseStorage(this);
@@ -59,6 +77,9 @@ public class DashbaseStorage extends StorageComponent {
   private final String kafkaUrl;
   private final String topic;
   private final String tableName;
+  boolean ssl;
+  String keystoreLocation;
+  String keystorePassword;
   private final KafkaSink kafkaSink;
   private final SpanConverter converter = new SpanConverter();
 
@@ -68,11 +89,21 @@ public class DashbaseStorage extends StorageComponent {
     kafkaUrl = builder.kafkaUrl;
     topic = builder.topic;
     tableName = builder.tableName;
+    ssl = builder.ssl;
+    keystoreLocation = builder.keystoreLocation;
+    keystorePassword = builder.keystorePassword;
 
     KafkaConfiguration configuration = new KafkaConfiguration();
     configuration.hosts = kafkaUrl;
+    if (ssl) {
+      configuration.kafkaProps.put("security.protocol", "SSL");
+      configuration.kafkaProps.put("ssl.keystore.location", keystoreLocation);
+      configuration.kafkaProps.put("ssl.truststore.location", keystoreLocation);
+      configuration.kafkaProps.put("ssl.keystore.password", keystorePassword);
+      configuration.kafkaProps.put("ssl.truststore.password", keystorePassword);
+      configuration.kafkaProps.put("ssl.key.password", keystorePassword);
+    }
     kafkaSink = new KafkaSink(configuration);
-
     logger.debug("Start dashbase backend! api:{} kafka:{}", apiUrl, kafkaUrl);
   }
 

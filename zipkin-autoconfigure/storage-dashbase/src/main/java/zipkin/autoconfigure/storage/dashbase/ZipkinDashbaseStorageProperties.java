@@ -12,6 +12,9 @@ public class ZipkinDashbaseStorageProperties implements Serializable { // for Sp
   private String kafkaUrl;
   private String topic;
   private String tableName;
+  private boolean ssl;
+  private String keystoreLocation;
+  private String keystorePassword;
 
   public String getApiUrl() {
     return apiUrl;
@@ -45,4 +48,27 @@ public class ZipkinDashbaseStorageProperties implements Serializable { // for Sp
     this.tableName = tableName;
   }
 
+  public boolean isSsl() {
+    return ssl;
+  }
+
+  public void setSsl(boolean ssl) {
+    this.ssl = ssl;
+  }
+
+  public String getKeystoreLocation() {
+    return keystoreLocation;
+  }
+
+  public void setKeystoreLocation(String keystoreLocation) {
+    this.keystoreLocation = keystoreLocation;
+  }
+
+  public String getKeystorePassword() {
+    return keystorePassword;
+  }
+
+  public void setKeystorePassword(String keystorePassword) {
+    this.keystorePassword = keystorePassword;
+  }
 }

@@ -126,6 +126,9 @@ zipkin:
       kafka-url: ${KAFKA_URL:localhost:9092}
       topic: ${KAFKA_TOPIC:nginx_json}
       table-name: ${TABLE_NAME:nginx_json}
+      ssl: ${KAFKA_SSL:false}
+      keystore_location: ${KEYSTORE_LOCATION:/keystore}
+      keystore_password: ${KEYSTORE_PASSWORD:123456}
   ui:
     enabled: ${QUERY_ENABLED:true}
     ## Values below here are mapped to ZipkinUiProperties, served as /config.json

@@ -15,6 +15,7 @@ public class ZipkinDashbaseStorageProperties implements Serializable { // for Sp
   private boolean ssl;
   private String keystoreLocation;
   private String keystorePassword;
+  private int maxResultsNum;
 
   public String getApiUrl() {
     return apiUrl;
@@ -70,5 +71,13 @@ public class ZipkinDashbaseStorageProperties implements Serializable { // for Sp
 
   public void setKeystorePassword(String keystorePassword) {
     this.keystorePassword = keystorePassword;
+  }
+
+  public int getMaxResultsNum() {
+    return maxResultsNum;
+  }
+
+  public void setMaxResultsNum(int maxResultsNum) {
+    this.maxResultsNum = maxResultsNum;
   }
 }

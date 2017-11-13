@@ -28,7 +28,7 @@ public class DashbaseSpanConsumer implements SpanConsumer {
   @Override
   public Call<Void> accept(List<Span> list) {
     List<DashbaseEvent> eventList = spanConverter.apply(list);
-    logger.info("Produce dashbase events:" + eventList.toString());
+    logger.debug("Produce dashbase events:" + eventList.toString());
 
     List<byte[]> bytesList = new ArrayList<>();
     eventList.forEach(event -> {

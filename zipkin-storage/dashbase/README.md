@@ -38,6 +38,26 @@ Dashbase table name.
 
 - default: nginx_json
 
+> SSL
+
+Boolean. Use ssl or not.
+
+- default: false
+
+> KEYSTORE_LOCATION
+
+- default: /keystore
+
+> KEYSTORE_PASSWORD
+
+- default: 123456
+
+> MAX_RESULTS_NUM
+
+The number of results for each query
+
+- default: 10000
+
 #### Run Your dashbase and kafka
 
 #### Run zipkin-server
@@ -63,17 +83,24 @@ mvn clean && mvn package
 java -jar target/mock-spans-1.0-SNAPSHOT-jar-with-dependencies.jar -n 30 -c zipkin-backend -t dashbase
 ```
 
-#### Query in dashbase-ui
+#### Query by dashbase-ui
 
 Wait a minutes to wait dashbase for ingesting, then you can see spans in dashbase Enjoy the dashbase-zipkin!
 
 ![](docs/dashbase-spans.png)
 
-#### Query in zipkin-ui
+#### Query by zipkin-webui
 
-> todo
+Wait a minutes to wait dashbase for ingesting, then enter http://YOUR_HOST:9411 to `find traces` and `analyze the dependencies`.
+
+Enjoy the dashbase-zipkin!
+
+- zipkin traces using dashbase backend
+![](docs/zipkin-traces.png)
+
+- zipkin dependencies using dashbase backend
+![zipkin-deps using dashbase backend](docs/zipkin-deps.png)
 
 ### Docker-compose
 
-> todo
-
+https://github.com/dashbase/zipkin-dashbase-docker

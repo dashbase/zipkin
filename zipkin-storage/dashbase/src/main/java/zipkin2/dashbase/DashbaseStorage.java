@@ -24,6 +24,7 @@ public class DashbaseStorage extends StorageComponent {
     boolean ssl;
     String keystoreLocation;
     String keystorePassword;
+    int maxResultsNum;
 
     @Override
     public Builder strictTraceId(boolean strictTraceId) {
@@ -66,6 +67,11 @@ public class DashbaseStorage extends StorageComponent {
       return this;
     }
 
+    public Builder maxResultsNum(int maxResultNum) {
+      this.maxResultsNum = maxResultNum;
+      return this;
+    }
+
     @Override
     public DashbaseStorage build() {
       return new DashbaseStorage(this);
@@ -77,6 +83,7 @@ public class DashbaseStorage extends StorageComponent {
   private final String kafkaUrl;
   private final String topic;
   private final String tableName;
+  private final int maxResultsNum;
   boolean ssl;
   String keystoreLocation;
   String keystorePassword;
@@ -89,6 +96,7 @@ public class DashbaseStorage extends StorageComponent {
     kafkaUrl = builder.kafkaUrl;
     topic = builder.topic;
     tableName = builder.tableName;
+    maxResultsNum = builder.maxResultsNum;
     ssl = builder.ssl;
     keystoreLocation = builder.keystoreLocation;
     keystorePassword = builder.keystorePassword;
@@ -109,7 +117,7 @@ public class DashbaseStorage extends StorageComponent {
 
   @Override
   public SpanStore spanStore() {
-    return new DashbaseSpanStore();
+    return new DashbaseSpanStore(apiUrl, tableName, maxResultsNum, strictTraceId);
   }
 
   @Override

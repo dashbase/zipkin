@@ -32,6 +32,7 @@ public class ZipkinDashbaseStorageAutoConfiguration {
       .ssl(props.isSsl())
       .keystoreLocation(props.getKeystoreLocation())
       .keystorePassword(props.getKeystorePassword())
+      .maxResultsNum(props.getMaxResultsNum())
       .build());
   }
 

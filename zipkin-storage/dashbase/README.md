@@ -80,12 +80,13 @@ In order to run the generator, you can refer to https://github.com/dashbase/zipk
 ```bash
 cd ${GENERATOR_BASE}
 mvn clean && mvn package
-java -jar target/mock-spans-1.0-SNAPSHOT-jar-with-dependencies.jar -n 30 -c zipkin-backend -t dashbase
+vi config.yml # configure 
+java -jar target/mock-spans-1.0-SNAPSHOT-jar-with-dependencies.jar
 ```
 
 #### Query by dashbase-ui
 
-Wait a minutes to wait dashbase for ingesting, then you can see spans in dashbase Enjoy the dashbase-zipkin!
+Wait a minute to wait dashbase for ingesting, then you can see spans in dashbase Enjoy the dashbase-zipkin!
 
 ![](docs/dashbase-spans.png)
 
